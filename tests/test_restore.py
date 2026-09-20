@@ -14,11 +14,12 @@ from kyrgyz_transliteration import (
 @pytest.mark.parametrize(
     "word,key",
     [
-        ("döñgölök", "donggolok"),
-        ("Kırgız", "kirgiz"),
-        ("İş", "ish"),
-        ("Çüy", "chuy"),
-        ("kıtaʺ", "kita"),
+        ("dongolok", "dongolok"),
+        ("dönggölök", "donggolok"),
+        ("Kyrgyz", "kyrgyz"),
+        ("Chüy", "chuy"),
+        ("kitaʺ", "kita"),
+        ("Ysyk-Köl", "ysyk-kol"),
     ],
 )
 def test_ascii_key(word, key):
@@ -27,9 +28,9 @@ def test_ascii_key(word, key):
 
 def test_wordlist_indexes_all_typing_variants():
     words = Wordlist(["дөңгөлөк", "жаңылык"])
-    for typed in ("dongolok", "donggolok", "döñgölök", "DONGOLOK"):
+    for typed in ("dongolok", "donggolok", "dönggölök", "DONGOLOK"):
         assert words.lookup(typed) == "дөңгөлөк"
-    for typed in ("jangylyk", "jangilik", "zhangylyk", "cañılık"):
+    for typed in ("jangylyk", "jangilik", "zhangylyk", "janylyk"):
         assert words.lookup(typed) == "жаңылык"
 
 
@@ -38,6 +39,27 @@ def test_ambiguous_key_is_not_used():
     assert words.lookup("kol") is None
     assert words.ambiguous_keys() == ["kol"]
     assert len(words) == 2
+
+
+def test_preferred_word_wins_an_ambiguous_key():
+    words = Wordlist(["уй"]).add(["үй"], preferred=True)
+    assert words.lookup("uy") == "үй"
+    assert words.ambiguous_keys() == []
+    assert words.preferred() == ["үй"]
+
+
+def test_preferred_word_wins_regardless_of_order():
+    first = Wordlist(["үй"], ).add(["уй"])
+    second = Wordlist(["уй"])
+    first.add(["үй"], preferred=True)
+    second.add(["үй"], preferred=True)
+    assert first.lookup("uy") == second.lookup("uy") == "үй"
+
+
+def test_two_preferred_words_are_ambiguous_again():
+    words = Wordlist()
+    words.add(["уй", "үй"], preferred=True)
+    assert words.lookup("uy") is None
 
 
 def test_wordlist_container_protocol():
@@ -53,6 +75,28 @@ def test_wordlist_from_file(tmp_path):
     words = Wordlist.from_file(str(path))
     assert len(words) == 2
     assert words.lookup("koygoy") == "көйгөй"
+
+
+def test_wordlist_file_marks_preferred_with_a_star(tmp_path):
+    path = tmp_path / "words.txt"
+    path.write_text("уй\n*үй\n", encoding="utf-8")
+    words = Wordlist.from_file(str(path))
+    assert words.lookup("uy") == "үй"
+    assert words.words() == ["уй", "үй"]
+
+
+def test_copy_is_independent_and_keeps_preferences():
+    twin = builtin_wordlist().copy().add(["көпөлөк"])
+    assert twin.lookup("kopolok") == "көпөлөк"
+    assert twin.lookup("uy") == "үй"
+    assert "kopolok" not in builtin_wordlist()
+
+
+def test_merge_carries_preferred_words_over():
+    custom = Wordlist(["уй"]).add(["үй"], preferred=True)
+    merged = Wordlist(["мектеп"]).merge(custom)
+    assert merged.lookup("uy") == "үй"
+    assert merged.lookup("mektep") == "мектеп"
 
 
 def test_restore_words_keeps_unknown_words_and_punctuation():
@@ -85,6 +129,26 @@ def test_stem_lookup_with_vowel_harmony(typed, expected):
     assert restore_words(typed, builtin_wordlist()) == expected
 
 
+@pytest.mark.parametrize(
+    "typed,expected",
+    [
+        ("dongologu", "дөңгөлөгү"),
+        ("kitebi", "китеби"),
+        ("eshigi", "эшиги"),
+        ("mektebi", "мектеби"),
+    ],
+)
+def test_stem_lookup_handles_final_voicing(typed, expected):
+    # Перед гласным окончанием к -> г, п -> б: без этого окончание не отделить.
+    assert restore_words(typed, builtin_wordlist()) == expected
+
+
+def test_voiced_stem_is_not_a_word_of_its_own():
+    words = Wordlist(["китеп"])
+    assert words.lookup("kiteb") is None
+    assert words.words() == ["китеп"]
+
+
 def test_stem_lookup_respects_min_stem():
     words = Wordlist(["көчө"], min_stem=10)
     assert restore_words("kochodo", words) == "kochodo"
@@ -93,7 +157,7 @@ def test_stem_lookup_respects_min_stem():
 
 def test_builtin_wordlist_is_cached_and_useful():
     assert builtin_wordlist() is builtin_wordlist()
-    assert len(builtin_wordlist()) > 200
+    assert len(builtin_wordlist()) > 400
     assert builtin_wordlist().lookup("mumkunchuluk") == "мүмкүнчүлүк"
 
 
@@ -104,27 +168,54 @@ def test_builtin_wordlist_is_cached_and_useful():
         ("jonokoy", "жөнөкөй"),
         ("omur", "өмүр"),
         ("kenesh", "кеңеш"),
+        ("kengesh", "кеңеш"),
         ("tushunuk", "түшүнүк"),
         ("kirgiz", "кыргыз"),
         ("kyrgyz", "кыргыз"),
+        ("jonundo", "жөнүндө"),
+        ("uy", "үй"),
     ],
 )
-def test_to_cyrillic_with_builtin_wordlist(typed, expected):
-    assert to_cyrillic(typed, wordlist=True) == expected
-    assert to_cyrillic(typed) != expected or typed == expected
+def test_to_cyrillic_restores_special_letters_by_default(typed, expected):
+    assert to_cyrillic(typed) == expected
+
+
+def test_wordlist_can_be_switched_off():
+    assert to_cyrillic("dongolok", wordlist=False) == "донголок"
+    assert to_cyrillic("uy", wordlist=False) == "уй"
+
+
+def test_empty_wordlist_is_not_mistaken_for_false():
+    # Пустой Wordlist ложен как контейнер, но это всё-таки словарь.
+    assert to_cyrillic("dongolok", wordlist=Wordlist()) == "донголок"
+
+
+@pytest.mark.parametrize(
+    "typed,expected",
+    [
+        ("Ysyk-Kol", "Ысык-Көл"),
+        ("YSYK-KOL", "ЫСЫК-КӨЛ"),
+        ("Ysyk-Koldon", "Ысык-Көлдөн"),
+        ("uy-bulo", "үй-бүлө"),
+        ("Jalal-Abad", "Жалал-Абад"),
+        ("ata-ene", "ата-эне"),
+    ],
+)
+def test_compound_words_are_restored_whole(typed, expected):
+    assert to_cyrillic(typed) == expected
 
 
 def test_wordlist_does_not_break_correct_latin():
-    assert to_cyrillic("döñgölök jañılık", wordlist=True) == "дөңгөлөк жаңылык"
-    assert to_cyrillic("Kırgız Respublikası", wordlist=True) == "Кыргыз Республикасы"
+    assert to_cyrillic("dönggölök jangylyk") == "дөңгөлөк жаңылык"
+    assert to_cyrillic("Kyrgyz Respublikasy") == "Кыргыз Республикасы"
 
 
 def test_transliterate_passes_wordlist_only_to_cyrillic():
-    assert transliterate("dongolok", wordlist=True) == "дөңгөлөк"
-    assert transliterate("дөңгөлөк", wordlist=True) == "döñgölök"
+    assert transliterate("dongolok") == "дөңгөлөк"
+    assert transliterate("дөңгөлөк") == "dongolok"
 
 
 def test_wordlist_can_be_extended():
-    words = Wordlist(builtin_wordlist().words()).add(["көпөлөк"])
+    words = builtin_wordlist().copy().add(["көпөлөк"])
     assert restore_words("kopolokton", words) == "көпөлөктөн"
     assert "kopolok" not in builtin_wordlist()

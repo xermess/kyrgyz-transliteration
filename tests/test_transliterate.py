@@ -3,6 +3,7 @@ import pytest
 
 from kyrgyz_transliteration import (
     SCHEMES,
+    builtin_wordlist,
     detect_script,
     slugify,
     to_cyrillic,
@@ -29,14 +30,25 @@ WORDS = [
 ]
 
 
-@pytest.mark.parametrize("word", WORDS)
-def test_iso9_round_trip_is_exact(word):
-    assert to_cyrillic(to_latin(word, "iso9"), "iso9") == word
+def test_library_speaks_english_only():
+    assert sorted(SCHEMES) == ["bgn", "english"]
+    for scheme in SCHEMES.values():
+        latin = "".join(scheme.mapping.values())
+        assert latin.isascii() or scheme.name == "bgn"
+    # В схеме по умолчанию — только буквы английского алфавита.
+    assert "".join(SCHEMES["english"].mapping.values()).isascii()
 
 
 @pytest.mark.parametrize("word", WORDS)
-def test_turkic_round_trip_is_exact_for_kyrgyz_words(word):
-    assert to_cyrillic(to_latin(word, "turkic"), "turkic") == word
+def test_bgn_round_trip_is_exact_without_a_wordlist(word):
+    # BGN/PCGN пишет ө, ү и ң отдельными знаками, поэтому читается обратно
+    # одними правилами.
+    assert to_cyrillic(to_latin(word, "bgn"), "bgn", wordlist=False) == word
+
+
+@pytest.mark.parametrize("word", WORDS)
+def test_english_round_trip_uses_the_wordlist(word):
+    assert to_cyrillic(to_latin(word)) == word
 
 
 @pytest.mark.parametrize("scheme", list(SCHEMES), ids=list(SCHEMES))
@@ -47,10 +59,20 @@ def test_non_letters_pass_through(scheme):
         assert token in result
 
 
-def test_turkic_defaults():
-    assert to_latin("Кыргыз Республикасы") == "Kırgız Respublikası"
-    assert to_latin("жаңы жыл") == "cañı cıl"
-    assert to_latin("Чүй облусу") == "Çüy oblusu"
+def test_english_defaults():
+    assert to_latin("Кыргыз Республикасы") == "Kyrgyz Respublikasy"
+    assert to_latin("жаңы жыл") == "jany jyl"
+    assert to_latin("Чүй облусу") == "Chuy oblusu"
+    assert to_latin("Ысык-Көл") == "Ysyk-Kol"
+    assert to_latin("өмүр") == "omur"
+    assert to_latin("Жалал-Абад") == "Jalal-Abad"
+
+
+def test_english_latin_has_no_letters_outside_a_to_z():
+    latin = to_latin("Өкмөттүн жаңы дөңгөлөгү — Ысык-Көлдөн")
+    letters = [char for char in latin if char.isalpha()]
+    assert all(char.isascii() for char in letters), latin
+    assert "—" in latin  # не-буквы проходят насквозь
 
 
 def test_bgn_examples():
@@ -58,48 +80,36 @@ def test_bgn_examples():
     assert to_latin("Ысык-Көл", "bgn") == "Ysyk-Köl"
     assert to_latin("Ёлка", "bgn") == "Yolka"
     assert to_latin("Ош шаары", "bgn") == "Osh shaary"
-
-
-def test_ascii_examples():
-    assert to_latin("Ысык-Көл", "ascii") == "Ysyk-Kol"
-    assert to_latin("Жалал-Абад", "ascii") == "Jalal-Abad"
-    assert to_latin("өмүр", "ascii") == "omur"
+    assert to_latin("жаңы", "bgn") == "jangy"
 
 
 def test_case_is_preserved():
-    assert to_latin("Жол") == "Col"
-    assert to_latin("ЖОЛ") == "COL"
-    assert to_latin("Ёлка", "iso9") == "Ëlka"
-    assert to_latin("ЁЛКА", "ascii") == "YOLKA"
-    assert to_latin("Ёлка", "ascii") == "Yolka"
-    assert to_latin("КЫРГЫЗ ЭЛИ") == "KIRGIZ ELİ"
-    assert to_cyrillic("KIRGIZ") == "КЫРГЫЗ"
-    assert to_cyrillic("Kırgız") == "Кыргыз"
+    assert to_latin("Жол") == "Jol"
+    assert to_latin("ЖОЛ") == "JOL"
+    assert to_latin("Ёлка") == "Yolka"
+    assert to_latin("ЁЛКА") == "YOLKA"
+    assert to_latin("КЫРГЫЗ ЭЛИ") == "KYRGYZ ELI"
+    assert to_cyrillic("KYRGYZ") == "КЫРГЫЗ"
+    assert to_cyrillic("Kyrgyz") == "Кыргыз"
 
 
 def test_single_letter_word_is_capitalized_not_shouted():
-    assert to_latin("Я жаздым", "ascii") == "Ya jazdym"
+    assert to_latin("Я жаздым") == "Ya jazdym"
 
 
-def test_turkic_dotted_capital_i():
-    assert to_latin("Иш") == "İş"
-    assert to_cyrillic("İş") == "Иш"
-    assert to_cyrillic("IŞ") == "ЫШ"
-
-
-def test_soft_and_hard_signs_are_dropped_in_latin_schemes():
-    assert to_latin("альбом", "ascii") == "albom"
-    assert to_latin("подъезд", "turkic") == "podezd"
+def test_soft_and_hard_signs_are_dropped_in_english():
+    assert to_latin("альбом") == "albom"
+    assert to_latin("подъезд") == "podezd"
 
 
 def test_digraphs_win_over_single_letters():
-    assert to_cyrillic("şçı", "turkic") == "щы"
-    assert to_cyrillic("shchi", "bgn") == "щи"
-    assert to_cyrillic("yurt", "ascii") == "юрт"
+    assert to_cyrillic("shchi") == "щи"
+    assert to_cyrillic("yurt") == "юрт"
+    assert to_cyrillic("khan") == "хан"
 
 
 def test_latin_extras_are_understood():
-    assert to_cyrillic("qwerty", "ascii") == "кверты"
+    assert to_cyrillic("qwerty") == "кверты"
 
 
 def test_empty_input():
@@ -110,14 +120,14 @@ def test_empty_input():
 
 def test_detect_script():
     assert detect_script("Бишкек") == "cyrillic"
-    assert detect_script("Bişkek") == "latin"
+    assert detect_script("Bishkek") == "latin"
     assert detect_script("Бишкек Bishkek") == "mixed"
     assert detect_script("2026!") == "unknown"
 
 
 def test_transliterate_auto_direction():
-    assert transliterate("Бишкек") == "Bişkek"
-    assert transliterate("Bişkek") == "Бишкек"
+    assert transliterate("Бишкек") == "Bishkek"
+    assert transliterate("Bishkek") == "Бишкек"
     assert transliterate("2026") == "2026"
     assert transliterate("Бишкек", direction="cyrillic") == "Бишкек"
     with pytest.raises(ValueError):
@@ -130,11 +140,12 @@ def test_slugify():
     assert slugify("  Манас   атанын  ") == "manas-atanyn"
     assert slugify("Бишкек 2026") == "bishkek-2026"
     assert slugify("Чүй", separator="") == "chuy"
+    assert slugify("Ысык-Көл", scheme="bgn") == "ysyk-kol"
 
 
 def test_multiline_text_keeps_line_breaks():
     text = "Кыргыз\nРеспубликасы\n"
-    assert to_latin(text) == "Kırgız\nRespublikası\n"
+    assert to_latin(text) == "Kyrgyz\nRespublikasy\n"
 
 
 @pytest.mark.parametrize(
@@ -151,33 +162,37 @@ def test_multiline_text_keeps_line_breaks():
         ("Kyrgyz Respublikasy", "Кыргыз Республикасы"),
     ],
 )
-def test_bgn_reverse_resolves_y(latin, cyrillic):
-    assert to_cyrillic(latin, "bgn") == cyrillic
+def test_reverse_resolves_y_between_short_i_and_yery(latin, cyrillic):
+    assert to_cyrillic(latin, "bgn", wordlist=False) == cyrillic
 
 
-@pytest.mark.parametrize("scheme", ["turkic", "bgn", "ascii"])
+@pytest.mark.parametrize("scheme", ["english", "bgn"])
 def test_reverse_ts_after_vowel_is_te_plus_se(scheme):
     assert to_cyrillic(to_latin("айтса кетсе", scheme), scheme) == "айтса кетсе"
     assert to_cyrillic(to_latin("концерт цирк", scheme), scheme) == "концерт цирк"
 
 
-@pytest.mark.parametrize("scheme", ["turkic", "bgn", "ascii"])
+@pytest.mark.parametrize("scheme", ["english", "bgn"])
 def test_word_initial_e_becomes_reversed_e(scheme):
     assert to_cyrillic(to_latin("эл эмгек эски", scheme), scheme) == "эл эмгек эски"
     assert to_cyrillic(to_latin("мектеп", scheme), scheme) == "мектеп"
 
 
-def test_ascii_reverse_tolerates_diacritics_of_other_schemes():
-    assert to_cyrillic("Ysyk-Köl", "ascii") == "Ысык-Көл"
-    assert to_cyrillic("çüy", "ascii") == "чүй"
+def test_english_reverse_tolerates_diacritics_of_bgn():
+    assert to_cyrillic("Ysyk-Köl") == "Ысык-Көл"
+    assert to_cyrillic("çüy") != ""  # ç не английская буква, но ü понимается
+    assert to_cyrillic("ömür", wordlist=False) == "өмүр"
 
 
 SENTENCE = "Кыргыз Республикасынын Жогорку Кеңеши"
 
 
-@pytest.mark.parametrize("scheme", ["turkic", "bgn", "iso9"])
-def test_sentence_round_trip(scheme):
-    assert to_cyrillic(to_latin(SENTENCE, scheme), scheme) == SENTENCE
+def test_sentence_round_trip_without_a_wordlist_needs_bgn():
+    assert to_cyrillic(to_latin(SENTENCE, "bgn"), "bgn", wordlist=False) == SENTENCE
+
+
+def test_sentence_round_trip_in_english_needs_the_wordlist():
+    assert to_cyrillic(to_latin(SENTENCE)) == SENTENCE
 
 
 WORDS_CORPUS = (
@@ -190,9 +205,24 @@ WORDS_CORPUS = (
 ).split()
 
 
-@pytest.mark.parametrize("scheme", ["turkic", "bgn", "iso9"])
-def test_corpus_round_trip(scheme):
+def test_corpus_round_trip_in_bgn_without_a_wordlist():
     broken = [
-        word for word in WORDS_CORPUS if to_cyrillic(to_latin(word, scheme), scheme) != word
+        word
+        for word in WORDS_CORPUS
+        if to_cyrillic(to_latin(word, "bgn"), "bgn", wordlist=False) != word
     ]
     assert broken == []
+
+
+def test_corpus_round_trip_in_english_with_the_wordlist():
+    broken = [word for word in WORDS_CORPUS if to_cyrillic(to_latin(word)) != word]
+    assert broken == []
+
+
+def test_builtin_wordlist_round_trips_apart_from_true_homographs():
+    words = builtin_wordlist().words()
+    broken = [word for word in words if to_cyrillic(to_latin(word)) != word]
+    # Пары вроде «кол»/«көл» пишутся по-английски одинаково: одно из двух
+    # слов неизбежно теряется, остальные 400+ восстанавливаются точно.
+    assert len(broken) <= 5
+    assert len(words) - len(broken) > 400

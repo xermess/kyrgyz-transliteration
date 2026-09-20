@@ -1,9 +1,9 @@
-"""Восстановление кыргызских слов из латиницы, набранной без диакритики.
+"""Восстановление кыргызских слов из английской латиницы.
 
-Схемы `turkic` и `bgn` обратимы, только если латиница написана полностью:
-``döñgölök`` -> ``дөңгөлөк``. Но люди пишут ``dongolok``, а по такой записи
-выбрать между «дөңгөлөк» и «донголок» нельзя — оба слова подчиняются гармонии
-гласных. Единственный надёжный способ — словарь.
+В английском алфавите нет ни ө, ни ү, ни ң: схема `english` пишет их как o, u
+и n, и по такой записи выбрать между «дөңгөлөк» и «донголок» нельзя — оба
+слова подчиняются гармонии гласных. Единственный надёжный способ — словарь.
+(Схема `bgn` пишет их отдельно — ö, ü, ng — и читается обратно без словаря.)
 
 :class:`Wordlist` индексирует кыргызские слова по «сплющенному» ASCII-ключу
 (``дөңгөлөк`` -> ``dongolok``, ``donggolok``). При разборе латиницы слово
@@ -20,7 +20,7 @@ import unicodedata
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from .core import Table, apply_table, match_case
-from .schemes import get_scheme
+from .schemes import DEFAULT_SCHEME, get_scheme
 
 __all__ = [
     "Wordlist",
@@ -29,14 +29,16 @@ __all__ = [
     "restore_words",
 ]
 
-_WORD_RE = re.compile(r"[^\W\d_]+")
+# Слово вместе с дефисами внутри: «Ысык-Көл» и «үй-бүлө» стоит искать в
+# словаре целиком — по отдельности «көл» от «кол» не отличить.
+_WORD_RE = re.compile(r"[^\W\d_]+(?:-[^\W\d_]+)*")
 
-# Варианты ASCII-записи каждой кыргызской буквы: так их набирают на практике.
-# Из них строятся все ключи слова (ө и ү без диакритики неотличимы от о и у,
-# ң пишут и как n, и как ng, ж — как j, zh или c).
+# Варианты латинской записи каждой кыргызской буквы: так их набирают на
+# практике. Из них строятся все ключи слова — ө и ү неотличимы от о и у, ң
+# пишут и как n, и как ng, ы и й — и как y, и как i, ж — как j или zh.
 _KEY_VARIANTS = {
     "а": ("a",), "б": ("b",), "в": ("v",), "г": ("g",), "д": ("d",),
-    "е": ("e",), "ё": ("yo", "e"), "ж": ("j", "zh", "c"), "з": ("z",),
+    "е": ("e",), "ё": ("yo", "e"), "ж": ("j", "zh"), "з": ("z",),
     "и": ("i",), "й": ("y", "i"), "к": ("k",), "л": ("l",), "м": ("m",),
     "н": ("n",), "ң": ("n", "ng"), "о": ("o",), "ө": ("o", "oe"), "п": ("p",),
     "р": ("r",), "с": ("s",), "т": ("t",), "у": ("u",), "ү": ("u", "ue"),
@@ -48,13 +50,15 @@ _KEY_VARIANTS = {
 #: Ограничение на число ключей одного слова.
 MAX_KEYS_PER_WORD = 64
 
-# Сведение латиницы всех схем к ASCII.
+# Сведение латиницы схем к ASCII: ö и ü из BGN/PCGN и знаки ъ и ь.
 _FOLD = {
-    "ı": "i", "ş": "sh", "ç": "ch", "ñ": "ng", "ö": "o", "ü": "u", "ğ": "g",
-    "ž": "zh", "š": "sh", "č": "ch", "ŝ": "shch", "ô": "o", "ù": "u",
-    "ņ": "ng", "è": "e", "ë": "yo", "û": "yu", "â": "ya", "ʺ": "", "ʹ": "",
-    "ʼ": "", "ʻ": "", "'": "", "’": "",
+    "ö": "o", "ü": "u", "ʺ": "", "ʹ": "", "ʼ": "", "ʻ": "", "'": "", "’": "",
 }
+
+# Конечный согласный основы озвончается перед гласным окончанием:
+# китеп -> китеби, эшик -> эшиги, дөңгөлөк -> дөңгөлөгү. Такие основы
+# заводятся в словаре отдельно, иначе окончание не отделить.
+_FINAL_VOICING = {"к": "г", "п": "б"}
 
 _FRONT_VOWELS = "еёиөүэ"
 _BACK_VOWELS = "аоуы"
@@ -68,19 +72,17 @@ _SUFFIX_TABLE: Optional[Table] = None
 
 
 def _suffix_table() -> Table:
-    """Таблица для разбора суффикса: ASCII-схема плюс латиница других схем.
+    """Таблица для разбора суффикса — обратная таблица схемы по умолчанию.
 
-    Суффикс приходит из того же небрежного текста, что и основа, поэтому
-    читать его алфавитом запрошенной схемы нельзя: в `turkic` «ch» — это
-    «ц + х», а человек имел в виду «ч».
+    От неё отличается только одним: правила начала слова не применяются.
+    Суффикс стоит в конце слова, поэтому его «e» — это «е», а не «э»
+    (``mektepte`` -> «мектепте», а не «мектептэ»).
     """
     global _SUFFIX_TABLE
     if _SUFFIX_TABLE is None:
-        base = get_scheme("ascii").reverse_table()
-        mapping = dict(base.mapping)
-        mapping.setdefault("c", "ж")
+        base = get_scheme(DEFAULT_SCHEME).reverse_table()
         _SUFFIX_TABLE = Table(
-            mapping=mapping,
+            mapping=dict(base.mapping),
             fold=dict(base.fold),
             contextual=tuple(base.contextual),
         )
@@ -90,12 +92,12 @@ def _suffix_table() -> Table:
 def ascii_key(word: str) -> str:
     """ASCII-ключ слова: нижний регистр, без диакритики и апострофов.
 
-        >>> ascii_key("döñgölök")
+        >>> ascii_key("dönggölök")
         'donggolok'
-        >>> ascii_key("Kırgız")
-        'kirgiz'
-        >>> ascii_key("İş")
-        'ish'
+        >>> ascii_key("Kyrgyz")
+        'kyrgyz'
+        >>> ascii_key("Chüy")
+        'chuy'
     """
     key, _ = _key_with_offsets(word)
     return key
@@ -110,7 +112,8 @@ def _key_with_offsets(word: str) -> Tuple[str, List[int]]:
     """ASCII-ключ и длина ключа после каждого символа исходного слова.
 
     Длины нужны, чтобы по границе основы в ключе найти границу в самом слове:
-    один символ может дать два (``ñ`` -> ``ng``).
+    один символ может дать два (лигатура ``ﬁ`` -> ``fi``) или ни одного
+    (апостроф вместо ъ и ь).
     """
     chars: List[str] = []
     offsets = [0]
@@ -129,7 +132,7 @@ class Wordlist:
 
     Слова задаются кириллицей. Ключ, на который претендуют два разных слова
     (``кол`` и ``көл`` -> ``kol``), считается неоднозначным и не используется:
-    такое слово останется как набрано.
+    такое слово разберётся обычными правилами схемы.
 
         >>> words = Wordlist(["дөңгөлөк", "түшүнүк"])
         >>> words.lookup("dongolok")
@@ -138,6 +141,16 @@ class Wordlist:
         'түшүнүк'
         >>> words.lookup("kompyuter") is None
         True
+
+    Спор за ключ можно решить, добавив более частотное слово как
+    предпочтительное: ``уй`` и ``үй`` оба пишутся ``uy``, но «үй» встречается
+    несравнимо чаще, и без такой пометки ү потерялось бы.
+
+        >>> pair = Wordlist(["уй"]).add(["үй"], preferred=True)
+        >>> pair.lookup("uy")
+        'үй'
+        >>> pair.ambiguous_keys()
+        []
     """
 
     def __init__(
@@ -148,23 +161,80 @@ class Wordlist:
     ) -> None:
         self.min_stem = min_stem
         self._forms: Dict[str, Optional[str]] = {}
+        self._stems: Dict[str, Optional[str]] = {}
+        self._pinned_keys: Set[str] = set()
+        self._preferred_words: Set[str] = set()
         self._words: Set[str] = set()
         self.add(words)
 
-    def add(self, words: Iterable[str]) -> "Wordlist":
-        """Добавить слова (кириллицей). Возвращает сам словарь."""
+    def add(self, words: Iterable[str], *, preferred: bool = False) -> "Wordlist":
+        """Добавить слова (кириллицей). Возвращает сам словарь.
+
+        :param preferred: закрепить за словом его ключи, отобрав их у обычных
+            слов. Так задаётся более частотное чтение неоднозначной латиницы
+            (``uy`` -> «үй», а не «уй»). Порядок добавления при этом не важен;
+            если на один ключ претендуют два предпочтительных слова, ключ
+            снова становится неоднозначным.
+        """
         for word in words:
             word = word.strip()
             if not word:
                 continue
             self._words.add(word)
+            if preferred:
+                self._preferred_words.add(word)
             for key in self._keys(word):
-                if not key:
-                    continue
-                if key in self._forms and self._forms[key] != word:
-                    self._forms[key] = None  # неоднозначный ключ
-                else:
-                    self._forms[key] = word
+                if key:
+                    self._claim(key, word, preferred)
+            self._add_voiced_stem(word)
+        return self
+
+    def _add_voiced_stem(self, word: str) -> None:
+        """Завести озвончённую основу слова: китеп -> китеб, эшик -> эшиг.
+
+        Она нужна только для поиска по началу слова: сама по себе такая
+        основа словом не является, поэтому в общий индекс не попадает.
+        """
+        voiced = _FINAL_VOICING.get(word[-1:].lower())
+        if voiced is None:
+            return
+        stem = word[:-1] + voiced
+        for key in self._keys(stem):
+            if key and self._stems.get(key, stem) != stem:
+                self._stems[key] = None  # основу делят два слова
+            elif key:
+                self._stems[key] = stem
+
+    def _claim(self, key: str, word: str, preferred: bool) -> None:
+        """Записать ключ за словом с учётом уже занятых и закреплённых ключей."""
+        taken = self._forms.get(key, word) != word  # на ключ претендует другое слово
+        if preferred:
+            self._forms[key] = None if taken and key in self._pinned_keys else word
+            self._pinned_keys.add(key)
+        elif key not in self._pinned_keys:
+            self._forms[key] = None if taken else word
+
+    def copy(self) -> "Wordlist":
+        """Независимая копия словаря — вместе с предпочтительными словами.
+
+            >>> mine = builtin_wordlist().copy().add(["көпөлөк"])
+            >>> mine.lookup("kopolok")
+            'көпөлөк'
+            >>> "kopolok" in builtin_wordlist()
+            False
+        """
+        twin = Wordlist(min_stem=self.min_stem)
+        twin._forms = dict(self._forms)
+        twin._stems = dict(self._stems)
+        twin._pinned_keys = set(self._pinned_keys)
+        twin._preferred_words = set(self._preferred_words)
+        twin._words = set(self._words)
+        return twin
+
+    def merge(self, other: "Wordlist") -> "Wordlist":
+        """Добавить слова другого словаря вместе с его предпочтительными чтениями."""
+        self.add(word for word in other.words() if word not in other._preferred_words)
+        self.add(other.preferred(), preferred=True)
         return self
 
     @staticmethod
@@ -183,19 +253,38 @@ class Wordlist:
 
     @classmethod
     def from_file(cls, path: str, *, min_stem: int = DEFAULT_MIN_STEM) -> "Wordlist":
-        """Прочитать список слов из файла: одно слово в строке, ``#`` — комментарий."""
+        """Прочитать список слов из файла: одно слово в строке, ``#`` — комментарий.
+
+        Строка, начинающаяся со звёздочки (``*үй``), задаёт предпочтительное
+        чтение — см. :meth:`add`.
+        """
         with open(path, encoding="utf-8") as handle:
-            words = _parse_words(handle.read())
-        return cls(words, min_stem=min_stem)
+            return cls.from_text(handle.read(), min_stem=min_stem)
+
+    @classmethod
+    def from_text(cls, text: str, *, min_stem: int = DEFAULT_MIN_STEM) -> "Wordlist":
+        """То же, что :meth:`from_file`, но список слов уже прочитан в строку."""
+        words = cls(min_stem=min_stem)
+        parsed = _parse_words(text)
+        words.add(word for word, preferred in parsed if not preferred)
+        words.add((word for word, preferred in parsed if preferred), preferred=True)
+        return words
 
     def lookup(self, key: str) -> Optional[str]:
         """Слово по ASCII-ключу или ``None``, если его нет или ключ неоднозначен."""
         return self._forms.get(ascii_key(key))
 
     def lookup_stem(self, key: str) -> Optional[Tuple[str, int]]:
-        """Самая длинная однозначная основа: ``(слово, длина ключа основы)``."""
+        """Самая длинная однозначная основа: ``(основа, длина ключа основы)``.
+
+        Основой может быть как само слово (``дөңгөлөк`` в ``dongolokton``),
+        так и его озвончённая форма (``дөңгөлөг`` в ``dongologu``).
+        """
         for size in range(len(key) - 1, self.min_stem - 1, -1):
-            form = self._forms.get(key[:size])
+            head = key[:size]
+            form = self._forms.get(head)
+            if form is None:
+                form = self._stems.get(head)
             if form is not None:
                 return form, size
         return None
@@ -208,6 +297,10 @@ class Wordlist:
         """Все слова словаря."""
         return sorted(self._words)
 
+    def preferred(self) -> List[str]:
+        """Слова, помеченные как предпочтительное чтение неоднозначной латиницы."""
+        return sorted(self._preferred_words)
+
     def __len__(self) -> int:
         return len(self._words)
 
@@ -218,13 +311,25 @@ class Wordlist:
         return "Wordlist({0} слов, {1} ключей)".format(len(self._words), len(self._forms))
 
 
-def _parse_words(text: str) -> List[str]:
-    """Разобрать список слов: одно слово в строке, ``#`` — комментарий."""
-    return [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
+def _parse_words(text: str) -> List[Tuple[str, bool]]:
+    r"""Разобрать список слов в пары ``(слово, предпочтительное ли)``.
+
+    Одно слово в строке, ``#`` — комментарий, ``*`` в начале строки помечает
+    предпочтительное чтение неоднозначного ключа (см. :meth:`Wordlist.add`).
+
+        >>> _parse_words("# дом\nуй\n*үй\n")
+        [('уй', False), ('үй', True)]
+    """
+    words = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        preferred = line.startswith("*")
+        word = line.lstrip("*").strip()
+        if word:
+            words.append((word, preferred))
+    return words
 
 
 _BUILTIN: Optional[Wordlist] = None
@@ -251,7 +356,7 @@ def builtin_wordlist() -> Wordlist:
             path = os.path.join(os.path.dirname(__file__), "data", "kyrgyz_frequent.txt")
             with open(path, encoding="utf-8") as handle:
                 text = handle.read()
-        _BUILTIN = Wordlist(_parse_words(text))
+        _BUILTIN = Wordlist.from_text(text)
     return _BUILTIN
 
 
@@ -268,12 +373,27 @@ def _harmonize(suffix: str, stem: str) -> str:
     return "".join(table.get(char, char) for char in suffix)
 
 
+def _restore_compound(token: str, wordlist: Wordlist) -> Optional[str]:
+    """Разобрать составное слово по частям, если целиком его в словаре нет.
+
+    Части, которых в словаре тоже нет, остаются латиницей — их разберут
+    правила схемы (``uy-bulo`` -> «үй-бүлө», ``ata-ene`` -> ``ata-ene``).
+    """
+    parts = token.split("-")
+    restored = [_restore_token(part, wordlist) for part in parts]
+    if all(form is None for form in restored):
+        return None
+    return "-".join(
+        part if form is None else form for part, form in zip(parts, restored)
+    )
+
+
 def restore_words(text: str, wordlist: Wordlist) -> str:
     """Заменить латинские слова на кириллические по словарю.
 
     Слова, которых в словаре нет, остаются как есть — их разберёт обычная
-    транслитерация (:func:`kyrgyz_transliteration.to_cyrillic` делает это сама,
-    если передать ей ``wordlist``).
+    транслитерация (:func:`kyrgyz_transliteration.to_cyrillic` делает это сама:
+    словарь у неё включён по умолчанию).
 
         >>> restore_words("Dongolok jok", builtin_wordlist())
         'Дөңгөлөк жок'
@@ -286,6 +406,8 @@ def restore_words(text: str, wordlist: Wordlist) -> str:
     for match in _WORD_RE.finditer(text):
         token = match.group()
         replacement = _restore_token(token, wordlist)
+        if replacement is None and "-" in token:
+            replacement = _restore_compound(token, wordlist)
         if replacement is None:
             continue
         result.append(text[position : match.start()])
@@ -299,12 +421,12 @@ def restore_words(text: str, wordlist: Wordlist) -> str:
 def _restore_token(token: str, wordlist: Wordlist) -> Optional[str]:
     """Кириллическое написание слова по словарю или ``None``, если не нашлось."""
     key, offsets = _key_with_offsets(token)
-    if not key.isascii() or not key.isalpha():
+    if not key.isascii() or not key.replace("-", "").isalpha():
         return None
 
     form = wordlist.lookup(key)
     if form is not None:
-        return match_case(token, form, all_caps=_is_caps(token))
+        return _match_case(token, form)
 
     found = wordlist.lookup_stem(key)
     if found is None:
@@ -315,7 +437,21 @@ def _restore_token(token: str, wordlist: Wordlist) -> Optional[str]:
     except ValueError:  # граница основы попала внутрь диграфа
         return None
     suffix = apply_table(token[split:], _suffix_table())
-    return match_case(token, stem + _harmonize(suffix, stem), all_caps=_is_caps(token))
+    return _match_case(token, stem + _harmonize(suffix, stem))
+
+
+def _match_case(token: str, form: str) -> str:
+    """Привести слово к регистру набранного — у составных слов по частям.
+
+    «Ysyk-Kol» — это «Ысык-Көл», а не «Ысык-көл»: с прописной каждая часть.
+    """
+    caps = _is_caps(token)
+    parts, forms = token.split("-"), form.split("-")
+    if len(parts) != len(forms):
+        return match_case(token, form, all_caps=caps)
+    return "-".join(
+        match_case(part, piece, all_caps=caps) for part, piece in zip(parts, forms)
+    )
 
 
 def _is_caps(token: str) -> bool:

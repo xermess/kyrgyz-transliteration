@@ -4,16 +4,17 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kyrgyz-transliteration"
-version = "0.1.0"
-description = "Транслитерация кыргызского языка: кириллица <-> латиница (общетюркская, BGN/PCGN, ISO 9, ASCII)"
+version = "0.2.0"
+description = "Транслитерация кыргызского языка: кириллица <-> английская латиница (english, BGN/PCGN)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
-keywords = ["kyrgyz", "kirghiz", "transliteration", "romanization", "cyrillic", "latin", "slugify"]
+keywords = ["kyrgyz", "kirghiz", "transliteration", "romanization", "cyrillic", "latin", "english", "slugify"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
     "Natural Language :: Russian",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",

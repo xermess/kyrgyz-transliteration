@@ -16,21 +16,21 @@ def run(argv, stdin=None, monkeypatch=None, capsys=None):
 def test_text_argument(capsys, monkeypatch):
     code, out, _ = run(["Кыргыз Республикасы"], capsys=capsys, monkeypatch=monkeypatch)
     assert code == 0
-    assert out == "Kırgız Respublikası\n"
+    assert out == "Kyrgyz Respublikasy\n"
 
 
 def test_scheme_and_direction(capsys, monkeypatch):
     code, out, _ = run(["-s", "bgn", "Ысык-Көл"], capsys=capsys, monkeypatch=monkeypatch)
     assert (code, out) == (0, "Ysyk-Köl\n")
     code, out, _ = run(
-        ["-d", "cyrillic", "Kırgız"], capsys=capsys, monkeypatch=monkeypatch
+        ["-d", "cyrillic", "Kyrgyz"], capsys=capsys, monkeypatch=monkeypatch
     )
     assert (code, out) == (0, "Кыргыз\n")
 
 
 def test_stdin(capsys, monkeypatch):
     code, out, _ = run([], stdin="Бишкек\n", capsys=capsys, monkeypatch=monkeypatch)
-    assert (code, out) == (0, "Bişkek\n")
+    assert (code, out) == (0, "Bishkek\n")
 
 
 def test_slug_and_detect(capsys, monkeypatch):
@@ -43,7 +43,8 @@ def test_slug_and_detect(capsys, monkeypatch):
 def test_list_and_table(capsys, monkeypatch):
     code, out, _ = run(["--list"], capsys=capsys, monkeypatch=monkeypatch)
     assert code == 0
-    assert "turkic" in out and "iso9" in out
+    assert "english" in out and "bgn" in out
+    assert "turkic" not in out and "iso9" not in out
     code, out, _ = run(["--table", "bgn"], capsys=capsys, monkeypatch=monkeypatch)
     assert code == 0
     assert "ж j" in out
@@ -61,9 +62,16 @@ def test_empty_stdin(capsys, monkeypatch):
     assert "usage" in err.lower()
 
 
-def test_builtin_wordlist_flag(capsys, monkeypatch):
-    code, out, _ = run(["-w", "dongolok kocho jok"], capsys=capsys, monkeypatch=monkeypatch)
+def test_wordlist_is_on_by_default(capsys, monkeypatch):
+    code, out, _ = run(["dongolok kocho jok"], capsys=capsys, monkeypatch=monkeypatch)
     assert (code, out) == (0, "дөңгөлөк көчө жок\n")
+
+
+def test_no_words_falls_back_to_scheme_rules(capsys, monkeypatch):
+    code, out, _ = run(
+        ["--no-words", "dongolok kocho jok"], capsys=capsys, monkeypatch=monkeypatch
+    )
+    assert (code, out) == (0, "донголок кочо жок\n")
 
 
 def test_wordlist_file(capsys, monkeypatch, tmp_path):
@@ -75,6 +83,17 @@ def test_wordlist_file(capsys, monkeypatch, tmp_path):
         monkeypatch=monkeypatch,
     )
     assert (code, out) == (0, "көпөлөктөн дөңгөлөк\n")
+
+
+def test_wordlist_file_without_the_builtin_one(capsys, monkeypatch, tmp_path):
+    path = tmp_path / "words.txt"
+    path.write_text("көпөлөк\n", encoding="utf-8")
+    code, out, _ = run(
+        ["--no-words", "--wordlist", str(path), "kopolok dongolok"],
+        capsys=capsys,
+        monkeypatch=monkeypatch,
+    )
+    assert (code, out) == (0, "көпөлөк донголок\n")
 
 
 def test_missing_wordlist_file_exits_with_error(capsys, monkeypatch):

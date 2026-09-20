@@ -26,7 +26,9 @@ __all__ = ["main", "build_parser"]
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="kyrgyz-translit",
-        description="Транслитерация кыргызского текста: кириллица <-> латиница.",
+        description=(
+            "Транслитерация кыргызского текста: кириллица <-> английская латиница."
+        ),
         epilog="Без аргумента TEXT текст читается со стандартного ввода.",
     )
     parser.add_argument("text", nargs="*", help="текст для транслитерации")
@@ -44,19 +46,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="направление преобразования (по умолчанию: auto)",
     )
     parser.add_argument(
-        "-w",
-        "--words",
-        action="store_true",
+        "--no-words",
+        dest="words",
+        action="store_false",
         help=(
-            "для латиницы без диакритики: восстанавливать слова по встроенному "
-            "списку частотных кыргызских слов"
+            "не восстанавливать ө, ү и ң по встроенному списку частотных "
+            "кыргызских слов: читать латиницу только правилами схемы"
         ),
     )
     parser.add_argument(
         "--wordlist",
         metavar="FILE",
         help=(
-            "то же, но со своим списком слов (одно слово в строке, кириллицей); "
+            "добавить свой список слов (одно слово в строке, кириллицей); "
             "встроенный список тоже используется"
         ),
     )
@@ -128,11 +130,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             sys.stdout.write(slugify(text.strip()) + "\n")
             return 0
 
-        wordlist = None
-        if args.words or args.wordlist:
-            wordlist = Wordlist(builtin_wordlist().words())
-            if args.wordlist:
-                wordlist.add(Wordlist.from_file(args.wordlist).words())
+        wordlist: "bool | Wordlist" = args.words
+        if args.wordlist:
+            custom = Wordlist.from_file(args.wordlist)
+            base = builtin_wordlist().copy() if args.words else Wordlist()
+            wordlist = base.merge(custom)
 
         keep_newline = text.endswith("\n")
         result = transliterate(text.rstrip("\n"), args.scheme, args.direction, wordlist)
