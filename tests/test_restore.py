@@ -5,6 +5,7 @@ from kyrgyz_transliteration import (
     Wordlist,
     ascii_key,
     builtin_wordlist,
+    builtin_names,
     restore_words,
     to_cyrillic,
     transliterate,
@@ -15,11 +16,11 @@ from kyrgyz_transliteration import (
     "word,key",
     [
         ("dongolok", "dongolok"),
-        ("dönggölök", "donggolok"),
+        ("donggolok", "donggolok"),
         ("Kyrgyz", "kyrgyz"),
-        ("Chüy", "chuy"),
+        ("Chuy", "chuy"),
         ("kitaʺ", "kita"),
-        ("Ysyk-Köl", "ysyk-kol"),
+        ("Ysyk-Kol", "ysyk-kol"),
     ],
 )
 def test_ascii_key(word, key):
@@ -28,7 +29,7 @@ def test_ascii_key(word, key):
 
 def test_wordlist_indexes_all_typing_variants():
     words = Wordlist(["дөңгөлөк", "жаңылык"])
-    for typed in ("dongolok", "donggolok", "dönggölök", "DONGOLOK"):
+    for typed in ("dongolok", "donggolok", "DONGOLOK"):
         assert words.lookup(typed) == "дөңгөлөк"
     for typed in ("jangylyk", "jangilik", "zhangylyk", "janylyk"):
         assert words.lookup(typed) == "жаңылык"
@@ -161,6 +162,18 @@ def test_builtin_wordlist_is_cached_and_useful():
     assert builtin_wordlist().lookup("mumkunchuluk") == "мүмкүнчүлүк"
 
 
+def test_builtin_names_are_available_and_merged():
+    assert builtin_names() is builtin_names()
+    assert builtin_names().lookup("Alibek") == "Алибек"
+    assert builtin_wordlist().lookup("Nurdoolot") == "Нурдөөлөт"
+    assert builtin_names().lookup_trigram("Nurdoolod") == "Нурдөөлөт"
+
+
+def test_trigram_name_matching_requires_name_like_capitalization():
+    assert to_cyrillic("Nurdoolod") == "Нурдөөлөт"
+    assert to_cyrillic("nurdoolod") != "Нурдөөлөт"
+
+
 @pytest.mark.parametrize(
     "typed,expected",
     [
@@ -206,7 +219,7 @@ def test_compound_words_are_restored_whole(typed, expected):
 
 
 def test_wordlist_does_not_break_correct_latin():
-    assert to_cyrillic("dönggölök jangylyk") == "дөңгөлөк жаңылык"
+    assert to_cyrillic("donggolok jangylyk") == "дөңгөлөк жаңылык"
     assert to_cyrillic("Kyrgyz Respublikasy") == "Кыргыз Республикасы"
 
 

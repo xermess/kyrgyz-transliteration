@@ -1,4 +1,4 @@
-"""Консольная утилита ``kyrgyz-translit``."""
+"""Консольная утилита ``kyrgyz-transliteration``."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ __all__ = ["main", "build_parser"]
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="kyrgyz-translit",
+        prog="kyrgyz-transliteration",
         description=(
             "Транслитерация кыргызского текста: кириллица <-> английская латиница."
         ),

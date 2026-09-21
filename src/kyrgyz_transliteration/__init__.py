@@ -27,6 +27,7 @@ from .core import Table, apply_table, match_case
 from .restore import (
     Wordlist,
     ascii_key,
+    builtin_names,
     builtin_wordlist,
     restore_words,
 )
@@ -54,6 +55,7 @@ __all__ = [
     "alphabet_table",
     "apply_table",
     "ascii_key",
+    "builtin_names",
     "builtin_wordlist",
     "detect_script",
     "get_scheme",
@@ -94,7 +96,7 @@ def to_latin(text: str, scheme: SchemeArg = DEFAULT_SCHEME) -> str:
         >>> to_latin("Манас атанын ак сарайы")
         'Manas atanyn ak sarayy'
         >>> to_latin("Ысык-Көл", scheme="bgn")
-        'Ysyk-Köl'
+        'Ysyk-Kol'
     """
     return apply_table(text, get_scheme(scheme).forward_table())
 
@@ -208,7 +210,7 @@ def alphabet_table(scheme: SchemeArg = DEFAULT_SCHEME) -> List[Tuple[str, str]]:
         >>> alphabet_table()[7]
         ('ж', 'j')
         >>> alphabet_table("bgn")[15]
-        ('ң', 'ng')
+        ('ң', 'n')
     """
     mapping: Dict[str, str] = get_scheme(scheme).mapping
     return [(letter, mapping.get(letter, "")) for letter in CYRILLIC_LETTERS]

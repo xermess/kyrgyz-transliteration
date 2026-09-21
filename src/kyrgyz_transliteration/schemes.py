@@ -42,7 +42,7 @@ DEFAULT_SCHEME = "english"
 MARKER_SHORT_I = ""  # y, который читается как «й»
 MARKER_TE = ""  # t в сочетании «тс», которое не является «ц»
 
-_VOWELS = "aeiouöü"
+_VOWELS = "aeiou"
 
 # «ts» после гласной — почти всегда стык «т» + «с» (айтса, кетсе), а не «ц».
 # Правило идёт первым, пока «y» ещё не заменён маркером.
@@ -58,13 +58,12 @@ _Y_RULES = (
     (re.compile(r"yyy"), "y" + MARKER_SHORT_I + "y"),
     (re.compile(r"(?<=[" + _VOWELS + r"])yy"), MARKER_SHORT_I + "y"),
     (re.compile(r"(?<![" + _VOWELS + r"])yy(?![aou])"), "y" + MARKER_SHORT_I),
-    (re.compile(r"(?<=[" + _VOWELS + r"])y(?=[eiöü])"), MARKER_SHORT_I),
+    (re.compile(r"y(?=ue)"), MARKER_SHORT_I),
+    (re.compile(r"(?<=[" + _VOWELS + r"])y(?=[ei])"), MARKER_SHORT_I),
     (re.compile(r"(?<=[" + _VOWELS + r"])y(?![" + _VOWELS + r"y])"), MARKER_SHORT_I),
 )
 
-# Читать библиотека умеет больше, чем пишет: в присланном тексте попадаются
-# ө и ү с диакритикой (в том числе из BGN/PCGN) и апострофы вместо ъ и ь.
-_TOLERANT = {"ö": "ө", "ü": "ү", "ʺ": "ъ", "ʼ": "ь", "ʻ": "ь"}
+_TOLERANT = {"ʺ": "ъ", "ʼ": "ь", "ʻ": "ь"}
 
 # Латинские буквы, которых нет в схемах, но которые встречаются в текстах
 # (заимствования, бренды). Нужны только для обратного направления.
@@ -111,6 +110,18 @@ class Scheme:
     notes: str = ""
     _forward: Optional[Table] = field(default=None, init=False, repr=False, compare=False)
     _reverse: Optional[Table] = field(default=None, init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        invalid = {
+            source: target
+            for source, target in self.mapping.items()
+            if not re.fullmatch(r"[A-Za-z]*", target)
+        }
+        if invalid:
+            raise ValueError(
+                "scheme mappings must contain only English ASCII letters; "
+                "invalid mappings: {0}".format(invalid)
+            )
 
     def forward_table(self) -> Table:
         """Таблица «кириллица -> латиница»."""
@@ -182,17 +193,17 @@ _ENGLISH = _scheme(
     ),
 )
 
-# --- BGN/PCGN ---------------------------------------------------------------
+# --- Extended English ASCII -------------------------------------------------
 
-_BGN = _scheme(
-    "bgn",
-    "BGN/PCGN — англоязычный стандарт романизации (карты, паспорта, пресса)",
+_ENGLISH_ASCII = _scheme(
+    "english_ascii",
+    "Расширенная английская ASCII-транслитерация без диакритики",
     {
         "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "yo",
-        "ж": "j", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
-        "н": "n", "ң": "ng", "о": "o", "ө": "ö", "п": "p", "р": "r", "с": "s",
-        "т": "t", "у": "u", "ү": "ü", "ф": "f", "х": "kh", "ц": "ts",
-        "ч": "ch", "ш": "sh", "щ": "shch", "ъ": "ʺ", "ы": "y", "ь": "ʼ",
+        "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+        "н": "n", "ң": "n", "о": "o", "ө": "o", "п": "p", "р": "r", "с": "s",
+        "т": "t", "у": "u", "ү": "u", "ф": "f", "х": "kh", "ц": "ts",
+        "ч": "ch", "ш": "sh", "щ": "shch", "ъ": "", "ы": "y", "ь": "",
         "э": "e", "ю": "yu", "я": "ya",
     },
     reverse_mapping={"y": "ы", MARKER_SHORT_I: "й", MARKER_TE: "т"},
@@ -200,14 +211,32 @@ _BGN = _scheme(
     reverse_contextual=_Y_RULES,
     lossy=True,
     notes=(
-        "Тот же английский алфавит, но ө, ү и ң пишутся точно (ö, ü, ng), "
-        "поэтому текст читается обратно без словаря. й и ы обе дают y: "
-        "обратно y — это й между гласной и согласной (ay -> ай) и ы в "
-        "остальных случаях (Ysyk -> Ысык), начальное e — это э (el -> эл)."
+        "Только ASCII: ң -> n, ө -> o, ү -> u, ж -> zh. "
+        "Буквы ң, ө и ү намеренно записываются как n, o и u, как в обычной "
+        "английской ASCII-практике; различия восстанавливаются словарём."
     ),
 )
 
-SCHEMES: Dict[str, Scheme] = {scheme.name: scheme for scheme in (_ENGLISH, _BGN)}
+# --- ASCII compatibility scheme ---------------------------------------------
+
+_BGN = _scheme(
+    "bgn",
+    "ASCII-совместимая схема (старое имя bgn)",
+    dict(_ENGLISH.mapping),
+    reverse_mapping={"y": "ы", MARKER_SHORT_I: "й", MARKER_TE: "т"},
+    reverse_word_initial={"e": "э"},
+    reverse_contextual=_Y_RULES,
+    lossy=True,
+    notes=(
+        "Сохраняется для совместимости со старым именем bgn. "
+        "Результат содержит только английские ASCII-буквы и использует "
+        "обычную английскую запись: ң -> n, ө -> o, ү -> u."
+    ),
+)
+
+SCHEMES: Dict[str, Scheme] = {
+    scheme.name: scheme for scheme in (_ENGLISH, _ENGLISH_ASCII, _BGN)
+}
 
 
 def get_scheme(scheme: "str | Scheme" = DEFAULT_SCHEME) -> Scheme:

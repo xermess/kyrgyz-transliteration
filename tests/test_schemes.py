@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import re
+
 import pytest
 
 from kyrgyz_transliteration import (
@@ -42,9 +44,20 @@ def test_english_writes_the_special_letters_with_plain_english_ones():
     assert (mapping["ж"], mapping["ч"], mapping["ш"]) == ("j", "ch", "sh")
 
 
-def test_bgn_keeps_the_special_letters_apart():
+def test_bgn_compatibility_scheme_is_ascii_only():
     mapping = SCHEMES["bgn"].mapping
-    assert (mapping["ң"], mapping["ө"], mapping["ү"]) == ("ng", "ö", "ü")
+    assert (mapping["ң"], mapping["ө"], mapping["ү"]) == ("n", "o", "u")
+
+
+def test_english_ascii_keeps_special_letters_without_diacritics():
+    mapping = SCHEMES["english_ascii"].mapping
+    assert (mapping["ң"], mapping["ө"], mapping["ү"]) == ("n", "o", "u")
+    assert "".join(mapping.values()).isascii()
+
+
+def test_scheme_rejects_non_english_output_letters():
+    with pytest.raises(ValueError, match="English ASCII"):
+        Scheme(name="invalid", title="Invalid", mapping={"а": "ö"})
 
 
 def test_no_scheme_uses_a_non_english_alphabet():
@@ -52,6 +65,10 @@ def test_no_scheme_uses_a_non_english_alphabet():
     forbidden = set("ışçğñžščŝôùņèëûâ")
     for scheme in list_schemes():
         assert not forbidden & set("".join(scheme.mapping.values()))
+        assert all(
+            re.fullmatch(r"[A-Za-z]*", value)
+            for value in scheme.mapping.values()
+        )
 
 
 def test_get_scheme_accepts_object_and_is_case_insensitive():

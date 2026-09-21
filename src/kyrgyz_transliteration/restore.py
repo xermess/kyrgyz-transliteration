@@ -3,7 +3,8 @@
 В английском алфавите нет ни ө, ни ү, ни ң: схема `english` пишет их как o, u
 и n, и по такой записи выбрать между «дөңгөлөк» и «донголок» нельзя — оба
 слова подчиняются гармонии гласных. Единственный надёжный способ — словарь.
-(Схема `bgn` пишет их отдельно — ö, ü, ng — и читается обратно без словаря.)
+(Все встроенные схемы пишут только английскими ASCII-буквами; `bgn` сохранён
+как совместимое имя старой схемы.)
 
 :class:`Wordlist` индексирует кыргызские слова по «сплющенному» ASCII-ключу
 (``дөңгөлөк`` -> ``dongolok``, ``donggolok``). При разборе латиницы слово
@@ -25,6 +26,7 @@ from .schemes import DEFAULT_SCHEME, get_scheme
 __all__ = [
     "Wordlist",
     "ascii_key",
+    "builtin_names",
     "builtin_wordlist",
     "restore_words",
 ]
@@ -49,8 +51,10 @@ _KEY_VARIANTS = {
 
 #: Ограничение на число ключей одного слова.
 MAX_KEYS_PER_WORD = 64
+NAME_TRIGRAM_MIN_SCORE = 0.72
+NAME_TRIGRAM_MIN_MARGIN = 0.08
 
-# Сведение латиницы схем к ASCII: ö и ü из BGN/PCGN и знаки ъ и ь.
+# Сведение допустимых латинских вариантов к ASCII.
 _FOLD = {
     "ö": "o", "ü": "u", "ʺ": "", "ʹ": "", "ʼ": "", "ʻ": "", "'": "", "’": "",
 }
@@ -92,11 +96,11 @@ def _suffix_table() -> Table:
 def ascii_key(word: str) -> str:
     """ASCII-ключ слова: нижний регистр, без диакритики и апострофов.
 
-        >>> ascii_key("dönggölök")
+        >>> ascii_key("donggolok")
         'donggolok'
         >>> ascii_key("Kyrgyz")
         'kyrgyz'
-        >>> ascii_key("Chüy")
+        >>> ascii_key("Chuy")
         'chuy'
     """
     key, _ = _key_with_offsets(word)
@@ -125,6 +129,21 @@ def _key_with_offsets(word: str) -> Tuple[str, List[int]]:
         chars.append(folded)
         offsets.append(offsets[-1] + len(folded))
     return "".join(chars), offsets
+
+
+def _trigrams(key: str) -> Set[str]:
+    """Return character trigrams with word-boundary markers."""
+    padded = "^^" + key + "$$"
+    return {padded[index : index + 3] for index in range(len(padded) - 2)}
+
+
+def _trigram_similarity(left: str, right: str) -> float:
+    """Dice similarity for two sets of boundary-aware character trigrams."""
+    left_grams = _trigrams(left)
+    right_grams = _trigrams(right)
+    if not left_grams or not right_grams:
+        return 0.0
+    return 2.0 * len(left_grams & right_grams) / (len(left_grams) + len(right_grams))
 
 
 class Wordlist:
@@ -165,9 +184,18 @@ class Wordlist:
         self._pinned_keys: Set[str] = set()
         self._preferred_words: Set[str] = set()
         self._words: Set[str] = set()
+        self._trigram_words: Set[str] = set()
+        self._trigram_index: Dict[str, Set[str]] = {}
+        self._name_index: Optional["Wordlist"] = None
         self.add(words)
 
-    def add(self, words: Iterable[str], *, preferred: bool = False) -> "Wordlist":
+    def add(
+        self,
+        words: Iterable[str],
+        *,
+        preferred: bool = False,
+        trigram: bool = False,
+    ) -> "Wordlist":
         """Добавить слова (кириллицей). Возвращает сам словарь.
 
         :param preferred: закрепить за словом его ключи, отобрав их у обычных
@@ -175,12 +203,15 @@ class Wordlist:
             (``uy`` -> «үй», а не «уй»). Порядок добавления при этом не важен;
             если на один ключ претендуют два предпочтительных слова, ключ
             снова становится неоднозначным.
+        :param trigram: добавить слово в индекс нечёткого поиска имён.
         """
         for word in words:
             word = word.strip()
             if not word:
                 continue
             self._words.add(word)
+            if trigram:
+                self._add_trigram_word(word)
             if preferred:
                 self._preferred_words.add(word)
             for key in self._keys(word):
@@ -188,6 +219,12 @@ class Wordlist:
                     self._claim(key, word, preferred)
             self._add_voiced_stem(word)
         return self
+
+    def _add_trigram_word(self, word: str) -> None:
+        self._trigram_words.add(word)
+        for key in self._keys(word):
+            for trigram in _trigrams(key):
+                self._trigram_index.setdefault(trigram, set()).add(word)
 
     def _add_voiced_stem(self, word: str) -> None:
         """Завести озвончённую основу слова: китеп -> китеб, эшик -> эшиг.
@@ -229,12 +266,22 @@ class Wordlist:
         twin._pinned_keys = set(self._pinned_keys)
         twin._preferred_words = set(self._preferred_words)
         twin._words = set(self._words)
+        twin._trigram_words = set(self._trigram_words)
+        twin._trigram_index = {
+            trigram: set(words) for trigram, words in self._trigram_index.items()
+        }
+        twin._name_index = self._name_index
         return twin
 
     def merge(self, other: "Wordlist") -> "Wordlist":
         """Добавить слова другого словаря вместе с его предпочтительными чтениями."""
-        self.add(word for word in other.words() if word not in other._preferred_words)
-        self.add(other.preferred(), preferred=True)
+        self.add(
+            (word for word in other.words() if word not in other._preferred_words),
+            trigram=False,
+        )
+        self.add(other.preferred(), preferred=True, trigram=False)
+        for word in other._trigram_words:
+            self._add_trigram_word(word)
         return self
 
     @staticmethod
@@ -272,7 +319,73 @@ class Wordlist:
 
     def lookup(self, key: str) -> Optional[str]:
         """Слово по ASCII-ключу или ``None``, если его нет или ключ неоднозначен."""
+        normalized = ascii_key(key)
+        form = self._forms.get(normalized)
+        if form is not None:
+            return form
+        if self._name_index is not None and normalized not in self._forms:
+            return self._name_index.lookup(normalized)
+        return None
+
+    def lookup_regular(self, key: str) -> Optional[str]:
+        """Look up only the regular word index, excluding names."""
         return self._forms.get(ascii_key(key))
+
+    def attach_name_index(self, names: "Wordlist") -> "Wordlist":
+        """Attach a separate name index without merging its collision-prone keys."""
+        self._name_index = names
+        return self
+
+    def lookup_trigram(
+        self,
+        key: str,
+        *,
+        min_score: float = NAME_TRIGRAM_MIN_SCORE,
+        min_margin: float = NAME_TRIGRAM_MIN_MARGIN,
+    ) -> Optional[str]:
+        """Найти близкое имя по перекрытию символьных триграмм.
+
+        Нечёткий поиск ограничен словами, добавленными с ``trigram=True``.
+        Возвращается только однозначный лучший кандидат; это предотвращает
+        случайную замену обычных слов или похожих имён.
+        """
+        normalized = ascii_key(key)
+        if self._name_index is not None and not self._trigram_words:
+            return self._name_index.lookup_trigram(
+                normalized,
+                min_score=min_score,
+                min_margin=min_margin,
+            )
+        if len(normalized) < 3 or not self._trigram_words:
+            return None
+
+        candidates: Set[str] = set()
+        for trigram in _trigrams(normalized):
+            candidates.update(self._trigram_index.get(trigram, ()))
+        if not candidates:
+            return None
+
+        ranked = sorted(
+            (
+                (_trigram_similarity(normalized, candidate_key), word)
+                for word in candidates
+                for candidate_key in self._keys(word)
+            ),
+            reverse=True,
+        )
+        if not ranked or ranked[0][0] < min_score:
+            return None
+        best_score = ranked[0][0]
+        best_words = {word for score, word in ranked if score == best_score}
+        if len(best_words) != 1:
+            return None
+        next_score = max(
+            (score for score, word in ranked if word not in best_words),
+            default=0.0,
+        )
+        if best_score - next_score < min_margin:
+            return None
+        return next(iter(best_words))
 
     def lookup_stem(self, key: str) -> Optional[Tuple[str, int]]:
         """Самая длинная однозначная основа: ``(основа, длина ключа основы)``.
@@ -333,6 +446,35 @@ def _parse_words(text: str) -> List[Tuple[str, bool]]:
 
 
 _BUILTIN: Optional[Wordlist] = None
+_BUILTIN_NAMES: Optional[Wordlist] = None
+
+
+def _resource_text(filename: str) -> str:
+    try:
+        from importlib.resources import files
+
+        return files("kyrgyz_transliteration.data").joinpath(filename).read_text(
+            encoding="utf-8"
+        )
+    except (ImportError, AttributeError):  # pragma: no cover - Python < 3.9
+        import os
+
+        path = os.path.join(os.path.dirname(__file__), "data", filename)
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+
+def builtin_names() -> Wordlist:
+    """Return the curated Kyrgyz name and surname index.
+
+    The returned object is cached and must not be mutated in place. Use
+    :meth:`Wordlist.copy` before adding application-specific names.
+    """
+    global _BUILTIN_NAMES
+    if _BUILTIN_NAMES is None:
+        _BUILTIN_NAMES = Wordlist.from_text(_resource_text("kyrgyz_names.txt"))
+        _BUILTIN_NAMES.add(_BUILTIN_NAMES.words(), trigram=True)
+    return _BUILTIN_NAMES
 
 
 def builtin_wordlist() -> Wordlist:
@@ -345,18 +487,8 @@ def builtin_wordlist() -> Wordlist:
     """
     global _BUILTIN
     if _BUILTIN is None:
-        try:
-            from importlib.resources import files
-
-            source = files("kyrgyz_transliteration.data").joinpath("kyrgyz_frequent.txt")
-            text = source.read_text(encoding="utf-8")
-        except (ImportError, AttributeError):  # pragma: no cover - Python < 3.9
-            import os
-
-            path = os.path.join(os.path.dirname(__file__), "data", "kyrgyz_frequent.txt")
-            with open(path, encoding="utf-8") as handle:
-                text = handle.read()
-        _BUILTIN = Wordlist.from_text(text)
+        _BUILTIN = Wordlist.from_text(_resource_text("kyrgyz_frequent.txt"))
+        _BUILTIN.attach_name_index(builtin_names())
     return _BUILTIN
 
 
@@ -424,7 +556,14 @@ def _restore_token(token: str, wordlist: Wordlist) -> Optional[str]:
     if not key.isascii() or not key.replace("-", "").isalpha():
         return None
 
-    form = wordlist.lookup(key)
+    form = (
+        wordlist.lookup(key)
+        if token[:1].isupper()
+        else wordlist.lookup_regular(key)
+    )
+    if form is None and token[:1].isupper():
+        form = wordlist.lookup_trigram(key)
+
     if form is not None:
         return _match_case(token, form)
 

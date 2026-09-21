@@ -21,7 +21,7 @@ def test_text_argument(capsys, monkeypatch):
 
 def test_scheme_and_direction(capsys, monkeypatch):
     code, out, _ = run(["-s", "bgn", "Ысык-Көл"], capsys=capsys, monkeypatch=monkeypatch)
-    assert (code, out) == (0, "Ysyk-Köl\n")
+    assert (code, out) == (0, "Ysyk-Kol\n")
     code, out, _ = run(
         ["-d", "cyrillic", "Kyrgyz"], capsys=capsys, monkeypatch=monkeypatch
     )

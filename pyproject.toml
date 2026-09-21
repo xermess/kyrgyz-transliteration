@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "kyrgyz-transliteration"
 version = "0.2.0"
-description = "Транслитерация кыргызского языка: кириллица <-> английская латиница (english, BGN/PCGN)"
+description = "Транслитерация кыргызского языка: кириллица <-> английская ASCII-латиница"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
@@ -27,7 +27,7 @@ dependencies = []
 dev = ["pytest>=7"]
 
 [project.scripts]
-kyrgyz-translit = "kyrgyz_transliteration.cli:main"
+kyrgyz-transliteration = "kyrgyz_transliteration.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kyrgyz_transliteration"]
